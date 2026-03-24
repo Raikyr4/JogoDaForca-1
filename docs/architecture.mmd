@@ -1,0 +1,19 @@
+flowchart LR
+    Client[React Frontend] -->|HTTP /| Nginx[Nginx Gateway]
+    Client -->|WS /ws| Nginx
+    Client -->|GET /api/lobby| Nginx
+
+    Nginx -->|LB| G1[game-server-1 FastAPI]
+    Nginx -->|LB| G2[game-server-2 FastAPI]
+
+    G1 <-->|Players Queue Matches| Redis[(Redis)]
+    G2 <-->|Players Queue Matches| Redis
+    G1 <-->|Pub/Sub server channels| Redis
+    G2 <-->|Pub/Sub server channels| Redis
+    RedisInsight -->|Inspect keys| Redis
+
+    Prom[Prometheus] -->|Scrape /metrics| G1
+    Prom -->|Scrape /metrics| G2
+    Promtail -->|Push logs| Loki[(Loki)]
+    Grafana -->|Metrics| Prom
+    Grafana -->|Logs| Loki

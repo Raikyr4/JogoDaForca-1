@@ -1,0 +1,119 @@
+services:
+  redis:
+    image: redis:7.4-alpine
+    container_name: hangman-redis
+    ports:
+      - "6379:6379"
+    command: ["redis-server", "--appendonly", "yes"]
+
+  redisinsight:
+    image: redis/redisinsight:latest
+    container_name: hangman-redisinsight
+    depends_on:
+      - redis
+    ports:
+      - "5540:5540"
+    volumes:
+      - redisinsight_data:/db
+
+  game-server-1:
+    build:
+      context: ./backend
+    container_name: hangman-game-server-1
+    environment:
+      SERVER_ID: game-server-1
+      REDIS_URL: redis://redis:6379/0
+      RECONNECT_TIMEOUT_SECONDS: 30
+      MAX_ERRORS: 6
+      LOG_LEVEL: INFO
+    depends_on:
+      - redis
+    ports:
+      - "8001:8000"
+
+  game-server-2:
+    build:
+      context: ./backend
+    container_name: hangman-game-server-2
+    environment:
+      SERVER_ID: game-server-2
+      REDIS_URL: redis://redis:6379/0
+      RECONNECT_TIMEOUT_SECONDS: 30
+      MAX_ERRORS: 6
+      LOG_LEVEL: INFO
+    depends_on:
+      - redis
+    ports:
+      - "8002:8000"
+
+  frontend:
+    build:
+      context: ./frontend
+    container_name: hangman-frontend
+    depends_on:
+      - game-server-1
+      - game-server-2
+
+  nginx:
+    image: nginx:1.27-alpine
+    container_name: hangman-nginx
+    depends_on:
+      - frontend
+      - game-server-1
+      - game-server-2
+    ports:
+      - "80:80"
+    volumes:
+      - ./infra/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+
+  prometheus:
+    image: prom/prometheus:v3.5.0
+    container_name: hangman-prometheus
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+    volumes:
+      - ./infra/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    ports:
+      - "9090:9090"
+    depends_on:
+      - game-server-1
+      - game-server-2
+
+  grafana:
+    image: grafana/grafana-oss:11.2.2
+    container_name: hangman-grafana
+    depends_on:
+      - prometheus
+      - loki
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    volumes:
+      - ./infra/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./infra/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    ports:
+      - "3000:3000"
+
+  loki:
+    image: grafana/loki:3.2.1
+    container_name: hangman-loki
+    command: -config.file=/etc/loki/local-config.yml
+    volumes:
+      - ./infra/loki/loki-config.yml:/etc/loki/local-config.yml:ro
+    ports:
+      - "3100:3100"
+
+  promtail:
+    image: grafana/promtail:3.2.1
+    container_name: hangman-promtail
+    command: -config.file=/etc/promtail/config.yml
+    volumes:
+      - ./infra/promtail/promtail-config.yml:/etc/promtail/config.yml:ro
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    depends_on:
+      - loki
+
+volumes:
+  redisinsight_data:
