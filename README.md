@@ -3,7 +3,7 @@
 Projeto distribuido com:
 
 - Backend: `FastAPI + WebSocket`
-- Frontend: `React`
+- Frontend: `React` (pasta `frontend`)
 - Estado compartilhado: `Redis`
 - Interface grafica do Redis: `RedisInsight`
 - Balanceamento: `Nginx`
@@ -49,14 +49,15 @@ flowchart LR
 
 ## 2. Regra atual da forca (turnos + 3 rodadas)
 
-Cada partida tem 2 jogadores e **uma forca compartilhada**:
+Cada partida tem 2 jogadores com palavra compartilhada por rodada e **forca individual por jogador**:
 
 1. A partida possui 3 rodadas, cada uma com palavra aleatoria e tema.
 2. O jogo e por turnos (um jogador por vez).
-3. Cada rodada usa a mesma palavra para ambos, com letras certas/erradas compartilhadas.
+3. Cada rodada usa a mesma palavra para ambos, com letras certas compartilhadas e erros individuais.
 4. O jogador pode jogar letra ou chutar a palavra inteira.
 5. Se errar o chute de palavra inteira, perde a partida automaticamente (`reason=wrong_word_guess`).
-6. Vence quem fizer mais pontos ao final (ou quem fechar maioria antes).
+6. Se um jogador atingir 6 erros na rodada, perde a rodada automaticamente.
+7. Vence quem fizer mais pontos ao final (ou quem fechar maioria antes).
 
 Reconexao e abandono:
 
@@ -144,8 +145,11 @@ Campos principais do novo `game_state`:
 - `masked_word`
 - `correct_letters`
 - `wrong_letters`
+- `opponent_wrong_letters`
 - `errors`
+- `opponent_errors`
 - `remaining_errors`
+- `opponent_remaining_errors`
 - `turn`
 - `is_your_turn`
 - `your_score`
@@ -158,6 +162,14 @@ Campos principais do novo `game_state`:
 ### Pre-requisitos
 
 - Docker + Docker Compose com daemon ativo.
+
+### Configuracao do frontend (novo)
+
+- O `docker-compose.yml` usa `frontend` como contexto de build do frontend.
+- Em modo local (fora do Docker), execute em `frontend/`:
+  - `npm install`
+  - `npm run dev`
+- Opcional: configurar `VITE_WS_URL` para apontar para um endpoint WebSocket especifico.
 
 ### Subir tudo
 

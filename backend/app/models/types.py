@@ -24,6 +24,7 @@ class RoundResult(TypedDict):
     winner: Optional[str]
     reason: str
     errors: int
+    player_errors: Dict[str, int]
     finished_at: int
 
 
@@ -39,8 +40,8 @@ class MatchState(TypedDict):
     current_word: str
     current_theme: str
     correct_letters: List[str]
-    wrong_letters: List[str]
-    errors: int
+    wrong_letters_by_player: Dict[str, List[str]]
+    errors_by_player: Dict[str, int]
     scores: Dict[str, int]
     round_history: List[RoundResult]
     status: MatchStatus

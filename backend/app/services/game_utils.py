@@ -24,6 +24,8 @@ def opponent_id(match: MatchState, player_id: str) -> str:
 
 def build_game_state_payload(match: MatchState, player_id: str, max_errors: int) -> dict:
     opp_id = opponent_id(match, player_id)
+    your_errors = int(match["errors_by_player"].get(player_id, 0))
+    opponent_errors = int(match["errors_by_player"].get(opp_id, 0))
     return {
         "type": "game_state",
         "match_id": match["match_id"],
@@ -33,9 +35,12 @@ def build_game_state_payload(match: MatchState, player_id: str, max_errors: int)
         "theme": match["current_theme"],
         "masked_word": masked_word(match["current_word"], match["correct_letters"]),
         "correct_letters": match["correct_letters"],
-        "wrong_letters": match["wrong_letters"],
-        "errors": match["errors"],
-        "remaining_errors": max(0, max_errors - match["errors"]),
+        "wrong_letters": match["wrong_letters_by_player"].get(player_id, []),
+        "opponent_wrong_letters": match["wrong_letters_by_player"].get(opp_id, []),
+        "errors": your_errors,
+        "opponent_errors": opponent_errors,
+        "remaining_errors": max(0, max_errors - your_errors),
+        "opponent_remaining_errors": max(0, max_errors - opponent_errors),
         "turn": match["turn"],
         "is_your_turn": match["status"] == "active" and match["turn"] == player_id,
         "can_guess": match["status"] == "active" and match["turn"] == player_id,

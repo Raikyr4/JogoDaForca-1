@@ -89,7 +89,9 @@ class GameService:
         return player_id
 
     async def join_queue(self, websocket: WebSocket, nickname: str) -> str:
-        return await self.register_player(websocket, nickname)
+        player_id = await self.register_player(websocket, nickname)
+        await self.matchmaking.join_queue(player_id)
+        return player_id
 
     async def join_room(self, player_id: str, room_id: str) -> None:
         result = await self.lobby_service.join_room(player_id, room_id)
@@ -310,7 +312,8 @@ class GameService:
                 await self.dispatcher.send_error(player_id, "Nao e sua vez")
                 return
 
-            if letter in match["correct_letters"] or letter in match["wrong_letters"]:
+            player_wrong_letters = match["wrong_letters_by_player"].get(player_id, [])
+            if letter in match["correct_letters"] or letter in player_wrong_letters:
                 self.metrics.inc_errors("repeated_letter")
                 await self.dispatcher.send_error(player_id, "Letra ja utilizada")
                 return
@@ -325,9 +328,9 @@ class GameService:
                     match["updated_at"] = int(time.time())
                     await self.repository.save_match(match)
             else:
-                match["wrong_letters"].append(letter)
-                match["errors"] += 1
-                if match["errors"] >= self.settings.max_errors:
+                match["wrong_letters_by_player"].setdefault(player_id, []).append(letter)
+                match["errors_by_player"][player_id] = match["errors_by_player"].get(player_id, 0) + 1
+                if match["errors_by_player"][player_id] >= self.settings.max_errors:
                     await self._complete_round(match, winner_id=opp_id, reason="max_errors")
                 else:
                     match["turn"] = opp_id
@@ -343,7 +346,7 @@ class GameService:
                     "player_id": player_id,
                     "letter": letter,
                     "hit": letter in match["current_word"],
-                    "errors": match["errors"],
+                    "player_errors": match["errors_by_player"].get(player_id, 0),
                     "turn": match["turn"],
                 },
             )
@@ -406,7 +409,8 @@ class GameService:
                         "theme": match["current_theme"],
                         "winner": opp_id,
                         "reason": "wrong_word_guess",
-                        "errors": match["errors"],
+                        "errors": match["errors_by_player"].get(player_id, 0),
+                        "player_errors": dict(match["errors_by_player"]),
                         "finished_at": int(time.time()),
                     }
                 )
@@ -483,7 +487,8 @@ class GameService:
                 "theme": match["current_theme"],
                 "winner": winner_id,
                 "reason": reason,
-                "errors": match["errors"],
+                "errors": max(match["errors_by_player"].values(), default=0),
+                "player_errors": dict(match["errors_by_player"]),
                 "finished_at": now,
             }
         )
@@ -513,8 +518,8 @@ class GameService:
         match["current_word"] = next_entry["word"]
         match["current_theme"] = next_entry["theme"]
         match["correct_letters"] = []
-        match["wrong_letters"] = []
-        match["errors"] = 0
+        match["wrong_letters_by_player"] = {pid: [] for pid in match["player_ids"]}
+        match["errors_by_player"] = {pid: 0 for pid in match["player_ids"]}
         match["turn"] = self._round_start_player(match, next_round)
         match["updated_at"] = now
 

@@ -86,8 +86,11 @@ export default function App() {
   const [maskedWord, setMaskedWord] = useState("");
   const [correctLetters, setCorrectLetters] = useState([]);
   const [wrongLetters, setWrongLetters] = useState([]);
+  const [opponentWrongLetters, setOpponentWrongLetters] = useState([]);
   const [errors, setErrors] = useState(0);
+  const [opponentErrors, setOpponentErrors] = useState(0);
   const [remainingErrors, setRemainingErrors] = useState(6);
+  const [opponentRemainingErrors, setOpponentRemainingErrors] = useState(6);
   const [turn, setTurn] = useState("");
   const [isYourTurn, setIsYourTurn] = useState(false);
   const [canGuess, setCanGuess] = useState(false);
@@ -160,8 +163,11 @@ export default function App() {
     setMaskedWord("");
     setCorrectLetters([]);
     setWrongLetters([]);
+    setOpponentWrongLetters([]);
     setErrors(0);
+    setOpponentErrors(0);
     setRemainingErrors(6);
+    setOpponentRemainingErrors(6);
     setTurn("");
     setIsYourTurn(false);
     setCanGuess(false);
@@ -292,8 +298,11 @@ export default function App() {
       setMaskedWord(payload.masked_word || "");
       setCorrectLetters(payload.correct_letters || []);
       setWrongLetters(payload.wrong_letters || []);
+      setOpponentWrongLetters(payload.opponent_wrong_letters || []);
       setErrors(payload.errors || 0);
+      setOpponentErrors(payload.opponent_errors || 0);
       setRemainingErrors(payload.remaining_errors || 0);
+      setOpponentRemainingErrors(payload.opponent_remaining_errors || 0);
       setTurn(payload.turn || "");
       setIsYourTurn(Boolean(payload.is_your_turn));
       setCanGuess(Boolean(payload.can_guess));
@@ -513,9 +522,9 @@ export default function App() {
     <main className="app-shell">
       <section className="panel">
         <header className="topbar">
-          <div>
-            <h1>Forca Arena</h1>
-            <p className="subtitle">Fluxo: nome do jogador -&gt; lobby -&gt; partida por turnos (3 rodadas)</p>
+          <div className="topbar-brand">
+            <h1>⚔ Forca Arena</h1>
+            <p className="subtitle">Desafie seus amigos em partidas de forca por turnos</p>
           </div>
           <div className="topbar-actions">
             <div className={`status ${isConnected ? "online" : "offline"}`}>{isConnected ? "Conectado" : "Desconectado"}</div>
@@ -644,9 +653,13 @@ export default function App() {
 
               <p className="masked-word">{maskedWord || "_ _ _ _"}</p>
               <p>Letras certas: {correctLetters.join(", ") || "-"}</p>
-              <p>Letras erradas: {wrongLetters.join(", ") || "-"}</p>
+              <p>Suas letras erradas: {wrongLetters.join(", ") || "-"}</p>
+              <p>Letras erradas do adversario: {opponentWrongLetters.join(", ") || "-"}</p>
               <p>
-                Erros: {errors}/6 (restam {remainingErrors})
+                Seus erros: {errors}/6 (restam {remainingErrors})
+              </p>
+              <p>
+                Erros do adversario: {opponentErrors}/6 (restam {opponentRemainingErrors})
               </p>
 
               <form className="guess-form" onSubmit={handleGuessLetter}>

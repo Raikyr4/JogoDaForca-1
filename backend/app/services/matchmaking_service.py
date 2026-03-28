@@ -117,8 +117,14 @@ class MatchmakingService:
             "current_word": first_round["word"],
             "current_theme": first_round["theme"],
             "correct_letters": [],
-            "wrong_letters": [],
-            "errors": 0,
+            "wrong_letters_by_player": {
+                player_1["player_id"]: [],
+                player_2["player_id"]: [],
+            },
+            "errors_by_player": {
+                player_1["player_id"]: 0,
+                player_2["player_id"]: 0,
+            },
             "scores": {
                 player_1["player_id"]: 0,
                 player_2["player_id"]: 0,
