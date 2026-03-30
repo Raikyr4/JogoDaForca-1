@@ -47,13 +47,27 @@ class GameService:
         self.word_bank = word_bank
         self.metrics = metrics
 
+    @staticmethod
+    def _normalize_nickname(nickname: str) -> str:
+        compact = " ".join(nickname.strip().split())
+        return compact.casefold()
+
     async def register_player(self, websocket: WebSocket, nickname: str) -> str:
         nickname = nickname.strip()
         if not nickname:
             raise ValueError("Nickname e obrigatorio")
+        normalized_nickname = self._normalize_nickname(nickname)
 
         player_id = str(uuid.uuid4())
         now = int(time.time())
+        nickname_claimed = await self.repository.claim_nickname(
+            normalized_nickname,
+            player_id,
+            self.settings.heartbeat_ttl_seconds,
+        )
+        if not nickname_claimed:
+            raise ValueError("Ja existe um jogador com esse nickname em sessao ativa")
+
         player: Player = {
             "player_id": player_id,
             "nickname": nickname,
@@ -66,9 +80,13 @@ class GameService:
             "queue_entered_at": None,
         }
 
-        await self.repository.save_player(player)
-        await self.repository.set_heartbeat(player_id, now)
-        await self.connection_manager.bind_player(player_id, websocket)
+        try:
+            await self.repository.save_player(player)
+            await self.repository.set_heartbeat(player_id, now)
+            await self.connection_manager.bind_player(player_id, websocket)
+        except Exception:
+            await self.repository.release_nickname_claim(normalized_nickname, player_id)
+            raise
 
         await self.connection_manager.send_local(
             player_id,
@@ -141,6 +159,16 @@ class GameService:
         player["last_seen"] = now
         await self.repository.save_player(player)
         await self.repository.set_heartbeat(player_id, now)
+        normalized_nickname = self._normalize_nickname(player["nickname"])
+        nickname_refreshed = await self.repository.refresh_nickname_claim(
+            normalized_nickname,
+            player_id,
+            self.settings.heartbeat_ttl_seconds,
+        )
+        if not nickname_refreshed:
+            await websocket.send_json({"type": "error", "message": "Nickname ja esta em uso em outra sessao"})
+            self.metrics.inc_errors("nickname_conflict_reconnect")
+            return False
         self.metrics.inc_reconnections()
 
         await self.connection_manager.send_local(
@@ -209,6 +237,14 @@ class GameService:
         player["last_seen"] = now
         await self.repository.save_player(player)
         await self.repository.set_heartbeat(player_id, now)
+        normalized_nickname = self._normalize_nickname(player["nickname"])
+        nickname_refreshed = await self.repository.refresh_nickname_claim(
+            normalized_nickname,
+            player_id,
+            self.settings.heartbeat_ttl_seconds,
+        )
+        if not nickname_refreshed:
+            self.metrics.inc_errors("nickname_conflict_heartbeat")
 
     async def disconnect(self, player_id: str) -> None:
         player = await self.repository.get_player(player_id)

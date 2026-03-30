@@ -192,12 +192,18 @@ class MatchmakingService:
 
     async def broadcast_queue_updates(self) -> None:
         waiting = await self.repository.list_waiting_players()
-        for position, player_id in enumerate(waiting, start=1):
-            await self.dispatcher.send_to_player(
+        waiting_total = len(waiting)
+        notifications = [
+            self.dispatcher.send_to_player(
                 player_id,
                 {
                     "type": "queue_update",
                     "position": position,
-                    "message": "Aguardando adversario",
+                    "waiting_total": waiting_total,
+                    "message": f"Aguardando adversario. Posicao {position} de {waiting_total}",
                 },
             )
+            for position, player_id in enumerate(waiting, start=1)
+        ]
+        if notifications:
+            await asyncio.gather(*notifications)

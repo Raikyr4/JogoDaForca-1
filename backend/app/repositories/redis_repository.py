@@ -29,6 +29,10 @@ class RedisRepository:
     def _room_key(room_id: str) -> str:
         return f"lobby:room:{room_id}"
 
+    @staticmethod
+    def _nickname_key(normalized_nickname: str) -> str:
+        return f"nickname:{normalized_nickname}"
+
     async def _set_json(self, key: str, value: dict) -> None:
         await self.redis.set(key, json.dumps(value))
 
@@ -154,3 +158,35 @@ class RedisRepository:
 
     async def publish_server_event(self, server_id: str, payload: str) -> None:
         await self.redis.publish(f"server:{server_id}", payload)
+
+    async def claim_nickname(self, normalized_nickname: str, player_id: str, ttl_seconds: int) -> bool:
+        key = self._nickname_key(normalized_nickname)
+        acquired = await self.redis.set(key, player_id, nx=True, ex=ttl_seconds)
+        return bool(acquired)
+
+    async def refresh_nickname_claim(self, normalized_nickname: str, player_id: str, ttl_seconds: int) -> bool:
+        key = self._nickname_key(normalized_nickname)
+        script = """
+        local current = redis.call("get", KEYS[1])
+        if not current then
+            redis.call("set", KEYS[1], ARGV[1], "EX", ARGV[2])
+            return 1
+        elseif current == ARGV[1] then
+            return redis.call("expire", KEYS[1], ARGV[2])
+        else
+            return 0
+        end
+        """
+        refreshed = await self.redis.eval(script, 1, key, player_id, str(ttl_seconds))
+        return bool(refreshed)
+
+    async def release_nickname_claim(self, normalized_nickname: str, player_id: str) -> None:
+        key = self._nickname_key(normalized_nickname)
+        script = """
+        if redis.call("get", KEYS[1]) == ARGV[1] then
+            return redis.call("del", KEYS[1])
+        else
+            return 0
+        end
+        """
+        await self.redis.eval(script, 1, key, player_id)
