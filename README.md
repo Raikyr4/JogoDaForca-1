@@ -13,6 +13,8 @@ Projeto distribuido com:
 
 ## 1. Arquitetura
 
+Documentação detalhada de revisão dos requisitos do trabalho: `docs/backend-revisao-requisitos.md`.
+
 ### Visao geral
 
 - O frontend abre em `http://localhost`.
@@ -170,6 +172,7 @@ Campos principais do novo `game_state`:
   - `npm install`
   - `npm run dev`
 - Opcional: configurar `VITE_WS_URL` para apontar para um endpoint WebSocket especifico.
+- O frontend usa `sessionStorage` (escopo por aba) para isolar sessão de jogador entre abas do mesmo navegador.
 
 ### Subir tudo
 
@@ -177,6 +180,18 @@ Campos principais do novo `game_state`:
 docker compose down -v
 docker compose up --build
 ```
+
+Se o frontend parecer "antigo" (cache de build/imagem), rode:
+
+```bash
+docker compose down
+docker compose build --no-cache frontend
+docker compose up -d
+```
+
+E no navegador faça um hard refresh (`Ctrl+F5`) ou abra em aba anônima para validar o novo bundle.
+
+Se ainda aparecer tema escuro indevido, limpe cache do navegador/site data para `http://localhost` e recarregue.
 
 ### Abrir todas as URLs automaticamente (Windows / PowerShell)
 

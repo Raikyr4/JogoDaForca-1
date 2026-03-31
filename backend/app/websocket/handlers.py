@@ -22,10 +22,13 @@ async def websocket_handler(websocket: WebSocket, game_service: GameService) -> 
                 if not nickname:
                     await websocket.send_json({"type": "error", "message": "Nickname obrigatorio"})
                     continue
-                if event_type == "join_queue":
-                    bound_player_id = await game_service.join_queue(websocket, nickname)
-                else:
-                    bound_player_id = await game_service.register_player(websocket, nickname)
+                try:
+                    if event_type == "join_queue":
+                        bound_player_id = await game_service.join_queue(websocket, nickname)
+                    else:
+                        bound_player_id = await game_service.register_player(websocket, nickname)
+                except ValueError as exc:
+                    await websocket.send_json({"type": "error", "message": str(exc)})
                 continue
 
             if event_type == "join_room":
@@ -100,7 +103,5 @@ async def websocket_handler(websocket: WebSocket, game_service: GameService) -> 
         logger.info("ws_disconnected", extra={"event": "ws_disconnected"})
     finally:
         player_id = await game_service.connection_manager.unbind_websocket(websocket)
-        if player_id is None:
-            player_id = bound_player_id
         if player_id is not None:
             await game_service.disconnect(player_id)

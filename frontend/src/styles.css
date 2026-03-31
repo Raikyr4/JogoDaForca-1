@@ -2,6 +2,7 @@
 
 /* ─── Design Tokens ─── */
 :root {
+  color-scheme: only light;
   --bg-deep: #f5f3ef;
   --bg-surface: #ffffff;
   --bg-card: #faf9f7;
@@ -32,6 +33,11 @@
   --shadow-lg: 0 8px 28px rgba(0, 0, 0, 0.08);
   --shadow-accent: 0 2px 10px rgba(59, 130, 160, 0.15);
   --transition: 0.18s ease;
+}
+
+html,
+body {
+  color-scheme: only light;
 }
 
 * {

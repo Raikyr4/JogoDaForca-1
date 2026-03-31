@@ -29,6 +29,11 @@ class RedisRepository:
     def _room_key(room_id: str) -> str:
         return f"lobby:room:{room_id}"
 
+    @staticmethod
+    def _nickname_key(nickname: str) -> str:
+        normalized = nickname.strip().lower()
+        return f"nickname:active:{normalized}"
+
     async def _set_json(self, key: str, value: dict) -> None:
         await self.redis.set(key, json.dumps(value))
 
@@ -154,3 +159,34 @@ class RedisRepository:
 
     async def publish_server_event(self, server_id: str, payload: str) -> None:
         await self.redis.publish(f"server:{server_id}", payload)
+
+    async def claim_nickname(self, nickname: str, player_id: str, ttl_seconds: int) -> bool:
+        key = self._nickname_key(nickname)
+        acquired = await self.redis.set(key, player_id, ex=ttl_seconds, nx=True)
+        return bool(acquired)
+
+    async def get_nickname_owner(self, nickname: str) -> Optional[str]:
+        key = self._nickname_key(nickname)
+        owner = await self.redis.get(key)
+        if not owner:
+            return None
+        return str(owner)
+
+    async def refresh_nickname_claim(self, nickname: str, player_id: str, ttl_seconds: int) -> bool:
+        key = self._nickname_key(nickname)
+        current_owner = await self.redis.get(key)
+        if current_owner != player_id:
+            return False
+        await self.redis.expire(key, ttl_seconds)
+        return True
+
+    async def release_nickname_if_owner(self, nickname: str, player_id: str) -> None:
+        key = self._nickname_key(nickname)
+        script = """
+        if redis.call("get", KEYS[1]) == ARGV[1] then
+            return redis.call("del", KEYS[1])
+        else
+            return 0
+        end
+        """
+        await self.redis.eval(script, 1, key, player_id)

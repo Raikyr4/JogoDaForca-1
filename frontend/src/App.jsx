@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 const PLAYER_STORAGE_KEY = "hangman_player_id";
 const NICKNAME_STORAGE_KEY = "hangman_nickname";
 const ROOM_POLL_INTERVAL_MS = 2000;
+const storage = window.sessionStorage;
 
 function buildWsUrl() {
   if (import.meta.env.VITE_WS_URL) return import.meta.env.VITE_WS_URL;
@@ -62,13 +63,13 @@ export default function App() {
   const heartbeatTimerRef = useRef(null);
   const reconnectAttemptsRef = useRef(0);
   const manualCloseRef = useRef(false);
-  const playerIdRef = useRef(localStorage.getItem(PLAYER_STORAGE_KEY) || "");
+  const playerIdRef = useRef(storage.getItem(PLAYER_STORAGE_KEY) || "");
 
   const [phase, setPhase] = useState("name");
   const [isConnected, setIsConnected] = useState(false);
 
-  const [nicknameInput, setNicknameInput] = useState(localStorage.getItem(NICKNAME_STORAGE_KEY) || "");
-  const [nickname, setNickname] = useState(localStorage.getItem(NICKNAME_STORAGE_KEY) || "");
+  const [nicknameInput, setNicknameInput] = useState("");
+  const [nickname, setNickname] = useState("");
   const [playerId, setPlayerId] = useState("");
   const [feedback, setFeedback] = useState("Digite seu nome para entrar no lobby");
 
@@ -240,8 +241,8 @@ export default function App() {
       const id = payload.player_id;
       setPlayerId(id);
       playerIdRef.current = id;
-      localStorage.setItem(PLAYER_STORAGE_KEY, id);
-      if (nickname) localStorage.setItem(NICKNAME_STORAGE_KEY, nickname);
+      storage.setItem(PLAYER_STORAGE_KEY, id);
+      if (nickname) storage.setItem(NICKNAME_STORAGE_KEY, nickname);
       setPhase("lobby");
       setFeedback("Conectado! Escolha uma sala.");
       loadLobby();
@@ -338,7 +339,7 @@ export default function App() {
       const message = payload.message || "Erro";
       setFeedback(message);
       if (message.toLowerCase().includes("sessao")) {
-        localStorage.removeItem(PLAYER_STORAGE_KEY);
+        storage.removeItem(PLAYER_STORAGE_KEY);
         setPlayerId("");
         playerIdRef.current = "";
         setPhase("name");
@@ -360,7 +361,7 @@ export default function App() {
     }
 
     if (clearPlayerStorage) {
-      localStorage.removeItem(PLAYER_STORAGE_KEY);
+      storage.removeItem(PLAYER_STORAGE_KEY);
     }
     setPlayerId("");
     playerIdRef.current = "";
@@ -378,8 +379,8 @@ export default function App() {
       return;
     }
 
-    const storedPlayerId = localStorage.getItem(PLAYER_STORAGE_KEY) || "";
-    const storedNickname = localStorage.getItem(NICKNAME_STORAGE_KEY) || "";
+    const storedPlayerId = storage.getItem(PLAYER_STORAGE_KEY) || "";
+    const storedNickname = storage.getItem(NICKNAME_STORAGE_KEY) || "";
     const shouldTryReconnect =
       Boolean(storedPlayerId) && storedNickname.toLowerCase() === cleanName.toLowerCase();
 
@@ -396,7 +397,7 @@ export default function App() {
 
     resetConnectionForNewLogin();
     setNickname(cleanName);
-    localStorage.setItem(NICKNAME_STORAGE_KEY, cleanName);
+    storage.setItem(NICKNAME_STORAGE_KEY, cleanName);
 
     setFeedback("Conectando...");
     openSocket({ type: "register_player", nickname: cleanName });
@@ -406,7 +407,7 @@ export default function App() {
     resetConnectionForNewLogin();
     setNickname("");
     setNicknameInput("");
-    localStorage.removeItem(NICKNAME_STORAGE_KEY);
+    storage.removeItem(NICKNAME_STORAGE_KEY);
     setPhase("name");
     setFeedback("Digite seu nome para entrar no lobby");
     loadLobby();
