@@ -14,6 +14,7 @@ Projeto distribuido com:
 ## 1. Arquitetura
 
 Documentação detalhada de revisão dos requisitos do trabalho: `docs/backend-revisao-requisitos.md`.
+- Documentação técnica completa do backend por funcionalidade: `docs/backend-funcionalidades-detalhadas.md`.
 
 ### Visao geral
 
