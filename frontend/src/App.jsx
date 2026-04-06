@@ -184,6 +184,15 @@ export default function App() {
     };
   }, []);
 
+  useEffect(() => {
+    if (!playerId || isConnected) return;
+    if (phase === "name" || phase === "reconnecting") return;
+    const timer = window.setTimeout(() => {
+      forceReconnect("Conexao interrompida. Tentando reconectar automaticamente...");
+    }, 300);
+    return () => window.clearTimeout(timer);
+  }, [isConnected, phase, playerId]);
+
   function clearMatchState() {
     setMatchId("");
     setOpponent("");
@@ -296,9 +305,7 @@ export default function App() {
         return;
       }
       if (playerIdRef.current) {
-        setPhase("reconnecting");
-        setFeedback("Conexao perdida. Tentando reconectar...");
-        scheduleReconnect();
+        forceReconnect("Conexao perdida. Tentando reconectar...");
       }
     };
 
