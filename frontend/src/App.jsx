@@ -77,7 +77,8 @@ function compareRooms(left, right) {
 
 export default function App() {
   const forcedServer = useMemo(() => getForcedServerFromUrl(), []);
-  const wsUrl = useMemo(() => buildWsUrl(forcedServer), [forcedServer]);
+  const [serverOverride, setServerOverride] = useState(forcedServer);
+  const wsUrl = useMemo(() => buildWsUrl(serverOverride), [serverOverride]);
   const wsRef = useRef(null);
   const reconnectTimerRef = useRef(null);
   const heartbeatTimerRef = useRef(null);
@@ -131,7 +132,7 @@ export default function App() {
 
   const loadLobby = useCallback(async () => {
     try {
-      const response = await fetch(buildApiUrl("/lobby", forcedServer));
+      const response = await fetch(buildApiUrl("/lobby", serverOverride));
       if (!response.ok) return;
       const payload = await response.json();
       const nextRooms = [...(payload.rooms || [])].sort(compareRooms);
@@ -141,7 +142,7 @@ export default function App() {
     } catch (_error) {
       // keep UI stable if lobby fetch fails temporarily.
     }
-  }, [forcedServer]);
+  }, [serverOverride]);
 
   useEffect(() => {
     loadLobby();
@@ -234,6 +235,11 @@ export default function App() {
   }
 
   function forceReconnect(message = "Conexao perdida. Tentando reconectar...") {
+    const shouldFallbackToBalancer = Boolean(serverOverride) && reconnectAttemptsRef.current >= 1;
+    if (shouldFallbackToBalancer) {
+      setServerOverride("");
+      message = `${message} Servidor fixo indisponivel. Voltando para balanceador.`;
+    }
     setIsConnected(false);
     setPhase("reconnecting");
     setFeedback(message);
@@ -501,7 +507,7 @@ export default function App() {
     if (!name) return;
 
     try {
-      const response = await fetch(buildApiUrl("/lobby/rooms", forcedServer), {
+      const response = await fetch(buildApiUrl("/lobby/rooms", serverOverride), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ name }),
@@ -590,7 +596,11 @@ export default function App() {
           </div>
           <div className="topbar-actions">
             <div className={`status ${isConnected ? "online" : "offline"}`}>{isConnected ? "Conectado" : "Desconectado"}</div>
-            {forcedServer && <div className="status">Roteado para: {forcedServer}</div>}
+            {serverOverride ? (
+              <div className="status">Roteado para: {serverOverride}</div>
+            ) : (
+              forcedServer && <div className="status">Roteamento automatico (fallback ativo)</div>
+            )}
             {playerId && (
               <button type="button" className="ghost-button" onClick={handleSwitchUser}>
                 Trocar jogador

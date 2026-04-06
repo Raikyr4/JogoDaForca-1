@@ -26,6 +26,7 @@ Para fixar uma sessão no backend desejado, adicione `?server=...` na URL:
 - Jogador B no backend 2: `http://localhost/?server=game-server-2`
 
 Esse parâmetro é aplicado ao WebSocket (`/ws`) e também às chamadas HTTP do frontend (`/api/...`).
+Se o backend fixado cair durante a partida, o cliente tenta reconectar nele primeiro e, após falha, remove o fixo e volta para o balanceador automaticamente.
 
 ## 3) Cenário base (dois jogadores)
 
