@@ -320,7 +320,8 @@ export default function App() {
       setPlayerId(id);
       playerIdRef.current = id;
       storage.setItem(PLAYER_STORAGE_KEY, id);
-      if (nickname) storage.setItem(NICKNAME_STORAGE_KEY, nickname);
+      const currentNickname = nickname || nicknameInput.trim();
+      if (currentNickname) storage.setItem(NICKNAME_STORAGE_KEY, currentNickname);
       setPhase("lobby");
       setFeedback("Conectado! Escolha uma sala.");
       loadLobby();
@@ -421,6 +422,27 @@ export default function App() {
       const message = payload.message || "Erro";
       setFeedback(message);
       const normalized = message.toLowerCase();
+      const isNicknameConflict =
+        normalized.includes("nickname") &&
+        (normalized.includes("em uso") || normalized.includes("ja existe um jogador"));
+      if (isNicknameConflict) {
+        const storedPlayerId = storage.getItem(PLAYER_STORAGE_KEY) || "";
+        const storedNickname = storage.getItem(NICKNAME_STORAGE_KEY) || "";
+        const typedNickname = (nicknameInput || nickname || "").trim().toLowerCase();
+        const shouldRetryReconnect =
+          Boolean(storedPlayerId) &&
+          Boolean(storedNickname) &&
+          Boolean(typedNickname) &&
+          storedNickname.toLowerCase() === typedNickname;
+        if (shouldRetryReconnect) {
+          setPlayerId(storedPlayerId);
+          playerIdRef.current = storedPlayerId;
+          setPhase("reconnecting");
+          setFeedback("Nickname em uso. Tentando recuperar sua sessao automaticamente...");
+          openSocket({ type: "reconnect", player_id: storedPlayerId });
+          return;
+        }
+      }
       const shouldResetSession =
         normalized.includes("sessao nao encontrada") ||
         normalized.includes("sessao expirada") ||
