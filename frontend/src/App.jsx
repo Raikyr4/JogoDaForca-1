@@ -137,8 +137,17 @@ export default function App() {
     heartbeatTimerRef.current = window.setInterval(() => {
       const ws = wsRef.current;
       if (ws && ws.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify({ type: "heartbeat", player_id: playerId }));
         if (Date.now() - lastHeartbeatAckRef.current > HEARTBEAT_TIMEOUT_MS) {
+          setPhase("reconnecting");
+          setFeedback("Conexao instavel. Tentando reconectar...");
+          ws.close();
+          return;
+        }
+        try {
+          ws.send(JSON.stringify({ type: "heartbeat", player_id: playerId }));
+        } catch (_error) {
+          setPhase("reconnecting");
+          setFeedback("Conexao perdida. Tentando reconectar...");
           ws.close();
         }
       }
