@@ -3,8 +3,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 const PLAYER_STORAGE_KEY = "hangman_player_id";
 const NICKNAME_STORAGE_KEY = "hangman_nickname";
 const ROOM_POLL_INTERVAL_MS = 2000;
-const HEARTBEAT_INTERVAL_MS = 5000;
-const HEARTBEAT_TIMEOUT_MS = 12000;
+const HEARTBEAT_INTERVAL_MS = 1000;
+const HEARTBEAT_TIMEOUT_MS = 3500;
 const WS_CONNECT_TIMEOUT_MS = 4000;
 const ALLOWED_TEST_SERVERS = new Set(["game-server-1", "game-server-2"]);
 const storage = window.sessionStorage;
@@ -235,7 +235,7 @@ export default function App() {
 
   function scheduleReconnect() {
     if (!playerIdRef.current || reconnectTimerRef.current) return;
-    const delay = Math.min(1000 * 2 ** reconnectAttemptsRef.current, 5000);
+    const delay = Math.min(300 * 2 ** reconnectAttemptsRef.current, 2000);
     reconnectAttemptsRef.current += 1;
     reconnectTimerRef.current = window.setTimeout(() => {
       reconnectTimerRef.current = null;
@@ -420,7 +420,12 @@ export default function App() {
     if (payload.type === "error") {
       const message = payload.message || "Erro";
       setFeedback(message);
-      if (message.toLowerCase().includes("sessao")) {
+      const normalized = message.toLowerCase();
+      const shouldResetSession =
+        normalized.includes("sessao nao encontrada") ||
+        normalized.includes("sessao expirada") ||
+        normalized.includes("player_id invalido para este socket");
+      if (shouldResetSession) {
         storage.removeItem(PLAYER_STORAGE_KEY);
         setPlayerId("");
         playerIdRef.current = "";
