@@ -6,12 +6,28 @@ const ROOM_POLL_INTERVAL_MS = 2000;
 const HEARTBEAT_INTERVAL_MS = 5000;
 const HEARTBEAT_TIMEOUT_MS = 12000;
 const WS_CONNECT_TIMEOUT_MS = 4000;
+const ALLOWED_TEST_SERVERS = new Set(["game-server-1", "game-server-2"]);
 const storage = window.sessionStorage;
 
-function buildWsUrl() {
-  if (import.meta.env.VITE_WS_URL) return import.meta.env.VITE_WS_URL;
+function getForcedServerFromUrl() {
+  const server = new URLSearchParams(window.location.search).get("server") || "";
+  return ALLOWED_TEST_SERVERS.has(server) ? server : "";
+}
+
+function withServerParam(path, forcedServer) {
+  if (!forcedServer) return path;
+  const separator = path.includes("?") ? "&" : "?";
+  return `${path}${separator}server=${encodeURIComponent(forcedServer)}`;
+}
+
+function buildWsUrl(forcedServer = "") {
+  if (import.meta.env.VITE_WS_URL) return withServerParam(import.meta.env.VITE_WS_URL, forcedServer);
   const protocol = window.location.protocol === "https:" ? "wss" : "ws";
-  return `${protocol}://${window.location.host}/ws`;
+  return `${protocol}://${window.location.host}${withServerParam("/ws", forcedServer)}`;
+}
+
+function buildApiUrl(path, forcedServer = "") {
+  return withServerParam(`/api${path}`, forcedServer);
 }
 
 function reasonLabel(reason) {
@@ -60,7 +76,8 @@ function compareRooms(left, right) {
 }
 
 export default function App() {
-  const wsUrl = useMemo(() => buildWsUrl(), []);
+  const forcedServer = useMemo(() => getForcedServerFromUrl(), []);
+  const wsUrl = useMemo(() => buildWsUrl(forcedServer), [forcedServer]);
   const wsRef = useRef(null);
   const reconnectTimerRef = useRef(null);
   const heartbeatTimerRef = useRef(null);
@@ -114,7 +131,7 @@ export default function App() {
 
   const loadLobby = useCallback(async () => {
     try {
-      const response = await fetch("/api/lobby");
+      const response = await fetch(buildApiUrl("/lobby", forcedServer));
       if (!response.ok) return;
       const payload = await response.json();
       const nextRooms = [...(payload.rooms || [])].sort(compareRooms);
@@ -124,7 +141,7 @@ export default function App() {
     } catch (_error) {
       // keep UI stable if lobby fetch fails temporarily.
     }
-  }, []);
+  }, [forcedServer]);
 
   useEffect(() => {
     loadLobby();
@@ -484,7 +501,7 @@ export default function App() {
     if (!name) return;
 
     try {
-      const response = await fetch("/api/lobby/rooms", {
+      const response = await fetch(buildApiUrl("/lobby/rooms", forcedServer), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ name }),
@@ -573,6 +590,7 @@ export default function App() {
           </div>
           <div className="topbar-actions">
             <div className={`status ${isConnected ? "online" : "offline"}`}>{isConnected ? "Conectado" : "Desconectado"}</div>
+            {forcedServer && <div className="status">Roteado para: {forcedServer}</div>}
             {playerId && (
               <button type="button" className="ghost-button" onClick={handleSwitchUser}>
                 Trocar jogador
