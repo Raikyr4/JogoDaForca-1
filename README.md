@@ -15,6 +15,7 @@ Projeto distribuido com:
 
 Documentação detalhada de revisão dos requisitos do trabalho: `docs/backend-revisao-requisitos.md`.
 - Documentação técnica completa do backend por funcionalidade: `docs/backend-funcionalidades-detalhadas.md`.
+- Guia de teste manual de reconexão/failover: `docs/teste-reconexao-failover.md`.
 
 ### Visao geral
 
@@ -137,6 +138,7 @@ Endpoint:
 - `game_state`
 - `opponent_disconnected`
 - `reconnected`
+- `heartbeat_ack`
 - `game_over`
 - `error`
 
@@ -257,6 +259,81 @@ Logs no Grafana:
 - Datasource `Loki` provisionado automaticamente.
 - Dashboard de logs: `Distributed Hangman Logs`.
 - Query padrao: logs de `game-server-1`, `game-server-2` e `nginx`.
+
+## 7.1 Como testar reconexão automática e failover (passo a passo)
+
+Este roteiro valida exatamente o cenário:
+- jogador A em uma instância,
+- jogador B em outra instância,
+- queda de uma instância e reconexão automática para a outra.
+
+### 7.1.1 Subir ambiente
+
+```bash
+docker compose down -v
+docker compose up --build -d
+```
+
+### 7.1.2 URLs que você vai usar
+
+- App (frontend + websocket via Nginx): `http://localhost`
+- Health backend 1 (direto): `http://localhost:8001/health`
+- Health backend 2 (direto): `http://localhost:8002/health`
+- Health balanceado pelo Nginx: `http://localhost/health/backend`
+
+### 7.1.3 Preparar duas sessões isoladas
+
+Use dois navegadores diferentes **ou** duas janelas anônimas separadas:
+1. Abra `http://localhost` na Janela A.
+2. Abra `http://localhost` na Janela B.
+3. Entre com nicknames diferentes (ex.: `Alice` e `Bruno`).
+4. Façam ambos entrar na mesma sala.
+5. Confirme início da partida (`match_found` + `game_state`).
+
+### 7.1.4 Forçar queda de um backend
+
+Em outro terminal, derrube um servidor:
+
+```bash
+docker compose stop game-server-2
+```
+
+Verifique:
+- `http://localhost:8002/health` deve falhar.
+- `http://localhost:8001/health` deve continuar ok.
+- `http://localhost/health/backend` deve continuar respondendo.
+
+### 7.1.5 O que deve acontecer no cliente
+
+1. O jogador que estava conectado no servidor derrubado perde o socket por alguns instantes.
+2. A UI entra em estado de reconexão ("Tentando reconectar...").
+3. O frontend tenta automaticamente reconectar em `/ws`.
+4. O Nginx direciona a nova conexão para o backend saudável.
+5. O cliente recebe `reconnected` e a partida continua (se dentro de 30s).
+
+### 7.1.6 Validar limite de 30 segundos
+
+Para validar abandono:
+1. Derrube novamente o backend onde um jogador estava conectado.
+2. Não reabra o cliente desse jogador por mais de 30s.
+3. O adversário deve receber vitória por `abandonment`.
+
+### 7.1.7 Subir o backend novamente
+
+```bash
+docker compose start game-server-2
+```
+
+Depois confira:
+- `http://localhost:8002/health` voltou.
+
+### 7.1.8 Dica de verificação adicional (logs)
+
+```bash
+docker compose logs -f nginx game-server-1 game-server-2
+```
+
+Procure eventos de reconexão e mudanças de rota após a queda de uma instância.
 
 Observacao:
 

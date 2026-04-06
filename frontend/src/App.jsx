@@ -3,12 +3,31 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 const PLAYER_STORAGE_KEY = "hangman_player_id";
 const NICKNAME_STORAGE_KEY = "hangman_nickname";
 const ROOM_POLL_INTERVAL_MS = 2000;
+const HEARTBEAT_INTERVAL_MS = 1000;
+const HEARTBEAT_TIMEOUT_MS = 3500;
+const WS_CONNECT_TIMEOUT_MS = 4000;
+const ALLOWED_TEST_SERVERS = new Set(["game-server-1", "game-server-2"]);
 const storage = window.sessionStorage;
 
-function buildWsUrl() {
-  if (import.meta.env.VITE_WS_URL) return import.meta.env.VITE_WS_URL;
+function getForcedServerFromUrl() {
+  const server = new URLSearchParams(window.location.search).get("server") || "";
+  return ALLOWED_TEST_SERVERS.has(server) ? server : "";
+}
+
+function withServerParam(path, forcedServer) {
+  if (!forcedServer) return path;
+  const separator = path.includes("?") ? "&" : "?";
+  return `${path}${separator}server=${encodeURIComponent(forcedServer)}`;
+}
+
+function buildWsUrl(forcedServer = "") {
+  if (import.meta.env.VITE_WS_URL) return withServerParam(import.meta.env.VITE_WS_URL, forcedServer);
   const protocol = window.location.protocol === "https:" ? "wss" : "ws";
-  return `${protocol}://${window.location.host}/ws`;
+  return `${protocol}://${window.location.host}${withServerParam("/ws", forcedServer)}`;
+}
+
+function buildApiUrl(path, forcedServer = "") {
+  return withServerParam(`/api${path}`, forcedServer);
 }
 
 function reasonLabel(reason) {
@@ -57,13 +76,17 @@ function compareRooms(left, right) {
 }
 
 export default function App() {
-  const wsUrl = useMemo(() => buildWsUrl(), []);
+  const forcedServer = useMemo(() => getForcedServerFromUrl(), []);
+  const [serverOverride, setServerOverride] = useState(forcedServer);
+  const wsUrl = useMemo(() => buildWsUrl(serverOverride), [serverOverride]);
   const wsRef = useRef(null);
   const reconnectTimerRef = useRef(null);
   const heartbeatTimerRef = useRef(null);
+  const connectTimeoutRef = useRef(null);
   const reconnectAttemptsRef = useRef(0);
   const manualCloseRef = useRef(false);
   const playerIdRef = useRef(storage.getItem(PLAYER_STORAGE_KEY) || "");
+  const lastHeartbeatAckRef = useRef(Date.now());
 
   const [phase, setPhase] = useState("name");
   const [isConnected, setIsConnected] = useState(false);
@@ -109,7 +132,7 @@ export default function App() {
 
   const loadLobby = useCallback(async () => {
     try {
-      const response = await fetch("/api/lobby");
+      const response = await fetch(buildApiUrl("/lobby", serverOverride));
       if (!response.ok) return;
       const payload = await response.json();
       const nextRooms = [...(payload.rooms || [])].sort(compareRooms);
@@ -119,7 +142,7 @@ export default function App() {
     } catch (_error) {
       // keep UI stable if lobby fetch fails temporarily.
     }
-  }, []);
+  }, [serverOverride]);
 
   useEffect(() => {
     loadLobby();
@@ -132,9 +155,17 @@ export default function App() {
     heartbeatTimerRef.current = window.setInterval(() => {
       const ws = wsRef.current;
       if (ws && ws.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify({ type: "heartbeat", player_id: playerId }));
+        if (Date.now() - lastHeartbeatAckRef.current > HEARTBEAT_TIMEOUT_MS) {
+          forceReconnect("Conexao instavel. Tentando reconectar...");
+          return;
+        }
+        try {
+          ws.send(JSON.stringify({ type: "heartbeat", player_id: playerId }));
+        } catch (_error) {
+          forceReconnect("Conexao perdida. Tentando reconectar...");
+        }
       }
-    }, 5000);
+    }, HEARTBEAT_INTERVAL_MS);
     return () => {
       if (heartbeatTimerRef.current) window.clearInterval(heartbeatTimerRef.current);
     };
@@ -143,6 +174,7 @@ export default function App() {
   useEffect(() => {
     return () => {
       clearReconnectTimer();
+      clearConnectTimeout();
       if (heartbeatTimerRef.current) window.clearInterval(heartbeatTimerRef.current);
       manualCloseRef.current = true;
       if (wsRef.current) {
@@ -151,6 +183,15 @@ export default function App() {
       }
     };
   }, []);
+
+  useEffect(() => {
+    if (!playerId || isConnected) return;
+    if (phase === "name" || phase === "reconnecting") return;
+    const timer = window.setTimeout(() => {
+      forceReconnect("Conexao interrompida. Tentando reconectar automaticamente...");
+    }, 300);
+    return () => window.clearTimeout(timer);
+  }, [isConnected, phase, playerId]);
 
   function clearMatchState() {
     setMatchId("");
@@ -185,14 +226,41 @@ export default function App() {
     reconnectAttemptsRef.current = 0;
   }
 
+  function clearConnectTimeout() {
+    if (connectTimeoutRef.current) {
+      window.clearTimeout(connectTimeoutRef.current);
+      connectTimeoutRef.current = null;
+    }
+  }
+
   function scheduleReconnect() {
     if (!playerIdRef.current || reconnectTimerRef.current) return;
-    const delay = Math.min(1000 * 2 ** reconnectAttemptsRef.current, 5000);
+    const delay = Math.min(300 * 2 ** reconnectAttemptsRef.current, 2000);
     reconnectAttemptsRef.current += 1;
     reconnectTimerRef.current = window.setTimeout(() => {
       reconnectTimerRef.current = null;
       openSocket({ type: "reconnect", player_id: playerIdRef.current });
     }, delay);
+  }
+
+  function forceReconnect(message = "Conexao perdida. Tentando reconectar...") {
+    const shouldFallbackToBalancer = Boolean(serverOverride) && reconnectAttemptsRef.current >= 1;
+    if (shouldFallbackToBalancer) {
+      setServerOverride("");
+      message = `${message} Servidor fixo indisponivel. Voltando para balanceador.`;
+    }
+    setIsConnected(false);
+    setPhase("reconnecting");
+    setFeedback(message);
+    clearConnectTimeout();
+
+    const ws = wsRef.current;
+    wsRef.current = null;
+    if (ws && ws.readyState !== WebSocket.CLOSED && ws.readyState !== WebSocket.CLOSING) {
+      ws.close();
+    }
+
+    scheduleReconnect();
   }
 
   function openSocket(firstMessage) {
@@ -207,33 +275,43 @@ export default function App() {
 
     const ws = new WebSocket(wsUrl);
     wsRef.current = ws;
+    clearConnectTimeout();
+    connectTimeoutRef.current = window.setTimeout(() => {
+      if (ws.readyState === WebSocket.CONNECTING) {
+        ws.close();
+      }
+    }, WS_CONNECT_TIMEOUT_MS);
 
     ws.onopen = () => {
       setIsConnected(true);
+      lastHeartbeatAckRef.current = Date.now();
+      clearConnectTimeout();
       clearReconnectTimer();
       ws.send(JSON.stringify(firstMessage));
     };
 
     ws.onmessage = (event) => {
+      lastHeartbeatAckRef.current = Date.now();
       const payload = JSON.parse(event.data);
       handleServerEvent(payload);
     };
 
     ws.onclose = () => {
       setIsConnected(false);
+      clearConnectTimeout();
       wsRef.current = null;
       if (manualCloseRef.current) {
         manualCloseRef.current = false;
         return;
       }
       if (playerIdRef.current) {
-        setPhase("reconnecting");
-        setFeedback("Conexao perdida. Tentando reconectar...");
-        scheduleReconnect();
+        forceReconnect("Conexao perdida. Tentando reconectar...");
       }
     };
 
-    ws.onerror = () => setFeedback("Erro de conexao com servidor");
+    ws.onerror = () => {
+      forceReconnect("Erro de conexao com servidor. Tentando reconectar...");
+    };
   }
 
   function handleServerEvent(payload) {
@@ -256,6 +334,10 @@ export default function App() {
       } else {
         setPhase("lobby");
       }
+      return;
+    }
+
+    if (payload.type === "heartbeat_ack") {
       return;
     }
 
@@ -338,7 +420,12 @@ export default function App() {
     if (payload.type === "error") {
       const message = payload.message || "Erro";
       setFeedback(message);
-      if (message.toLowerCase().includes("sessao")) {
+      const normalized = message.toLowerCase();
+      const shouldResetSession =
+        normalized.includes("sessao nao encontrada") ||
+        normalized.includes("sessao expirada") ||
+        normalized.includes("player_id invalido para este socket");
+      if (shouldResetSession) {
         storage.removeItem(PLAYER_STORAGE_KEY);
         setPlayerId("");
         playerIdRef.current = "";
@@ -350,6 +437,7 @@ export default function App() {
   function resetConnectionForNewLogin(options = {}) {
     const { clearPlayerStorage = true } = options;
     clearReconnectTimer();
+    clearConnectTimeout();
     if (heartbeatTimerRef.current) {
       window.clearInterval(heartbeatTimerRef.current);
       heartbeatTimerRef.current = null;
@@ -431,7 +519,7 @@ export default function App() {
     if (!name) return;
 
     try {
-      const response = await fetch("/api/lobby/rooms", {
+      const response = await fetch(buildApiUrl("/lobby/rooms", serverOverride), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ name }),
@@ -520,6 +608,11 @@ export default function App() {
           </div>
           <div className="topbar-actions">
             <div className={`status ${isConnected ? "online" : "offline"}`}>{isConnected ? "Conectado" : "Desconectado"}</div>
+            {serverOverride ? (
+              <div className="status">Roteado para: {serverOverride}</div>
+            ) : (
+              forcedServer && <div className="status">Roteamento automatico (fallback ativo)</div>
+            )}
             {playerId && (
               <button type="button" className="ghost-button" onClick={handleSwitchUser}>
                 Trocar jogador

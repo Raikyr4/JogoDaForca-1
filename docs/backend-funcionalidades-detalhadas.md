@@ -214,6 +214,21 @@ Com evento `reconnect` (ou restauração por login no mesmo nickname):
 5. notifica adversário (`reconnected`);
 6. reenvia estado atual da partida.
 
+### 7.2.1 Por que chamamos de “automática”
+
+A reconexão é automática no frontend, sem clique extra do usuário:
+
+1. Ao `onclose` do WebSocket, o app muda para fase `reconnecting`.
+2. Um timer agenda nova tentativa (`scheduleReconnect`) com **backoff exponencial**.
+3. O cliente abre novo socket no mesmo endpoint `/ws`.
+4. Ao `onopen`, envia imediatamente o evento `reconnect` com o `player_id` persistido na sessão.
+5. Se a restauração for aceita, o servidor responde com `reconnected` e o jogo volta para `match`/`lobby`.
+
+Observação de infraestrutura:
+- O frontend reconecta sempre ao endpoint único do Nginx; quem decide a instância é o balanceador.
+- Assim, se `game-server-2` estiver indisponível, a nova conexão pode ser absorvida por `game-server-1`.
+- A sessão continua viável porque estado e metadados estão em Redis (incluindo `match`, `player` e deadlines).
+
 ### 7.3 Expiração do prazo
 
 `TimeoutService` roda periodicamente (default 1s):
@@ -318,4 +333,3 @@ No encerramento, ambos recebem:
 2. **Resiliência de sessão** combina heartbeat, claim de nickname com TTL e janela de reconexão.
 3. **Escalabilidade horizontal** é suportada por desacoplamento entre conexão local e estado global + Pub/Sub entre instâncias.
 4. **Operabilidade** é reforçada por métricas de negócio/técnicas e logs estruturados para diagnóstico.
-

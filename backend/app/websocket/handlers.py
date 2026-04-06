@@ -96,6 +96,7 @@ async def websocket_handler(websocket: WebSocket, game_service: GameService) -> 
                     continue
                 if player_id:
                     await game_service.heartbeat(player_id)
+                    await websocket.send_json({"type": "heartbeat_ack"})
                 continue
 
             await websocket.send_json({"type": "error", "message": "Evento desconhecido"})

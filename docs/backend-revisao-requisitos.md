@@ -89,6 +89,38 @@ Este documento descreve como o projeto trata cada requisito solicitado no enunci
 - Se prazo expira:
   - rotina de timeout finaliza partida por `abandonment`, declarando vitória do adversário.
 
+### Reconexão automática (cliente + balanceador) — como funciona na prática
+
+Sim, a reconexão é automática no cliente e acontece em camadas:
+
+1. **Queda de socket detectada no frontend**
+   - Quando o `WebSocket` fecha (`onclose`), o frontend entra no estado `reconnecting`.
+   - Se houver sessão ativa (`player_id` salvo em `sessionStorage`), agenda nova tentativa automática.
+
+2. **Retentativas com backoff exponencial**
+   - O cliente tenta abrir novo `WebSocket` em `/ws` com atraso crescente (1s, 2s, 4s, até 5s).
+   - Em cada sucesso de conexão, envia `{"type":"reconnect","player_id":"..."}` para restaurar sessão.
+
+3. **Redirecionamento para backend saudável via Nginx**
+   - O cliente não escolhe explicitamente `game-server-1` ou `game-server-2`.
+   - Ele sempre reconecta no endpoint único `/ws` do Nginx.
+   - Se uma instância falhou, o upstream saudável tende a receber as novas conexões.
+
+4. **Restauração de contexto no backend**
+   - O backend valida a sessão pelo `player_id`.
+   - Atualiza `connected_server` para o servidor que recebeu a reconexão.
+   - Remove deadline de desconexão e reenvia `game_state`.
+   - O adversário recebe evento `reconnected`.
+
+5. **Limite temporal da recuperação**
+   - Todo esse ciclo precisa concluir antes de `reconnect_timeout_seconds` (default 30s).
+   - Se não concluir, a partida encerra por abandono.
+
+#### O que isso garante (e o que não garante)
+
+- **Garante:** retomada automática da sessão sem login manual, inclusive podendo voltar por outra instância.
+- **Não garante:** continuidade totalmente transparente do socket (há uma breve interrupção enquanto reconecta).
+
 ### Ponto importante de UX corrigido
 
 - Login com **mesmo nickname** durante janela de reconexão agora tenta restaurar a sessão anterior (quando aplicável), em vez de criar novo jogador desconectado da partida.
@@ -151,4 +183,3 @@ No cliente, o SVG exibe progressivamente essas 6 partes.
 4. Repetir cenário e aguardar >30s para provar vitória por abandono.
 5. Mostrar letras certas/erradas, progressão da forca e fim por 6 erros.
 6. Mostrar dashboards (conexões, fila, partidas ativas/finalizadas, erros).
-
