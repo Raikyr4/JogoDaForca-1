@@ -1,4 +1,5 @@
 import asyncio
+import time
 
 from app.monitoring.metrics import Metrics
 from app.repositories.redis_repository import RedisRepository
@@ -25,3 +26,13 @@ async def run_pubsub_loop(subscriber: ServerChannelSubscriber) -> None:
     while True:
         await subscriber.pump_once()
         await asyncio.sleep(0.01)
+
+
+async def run_server_heartbeat_loop(
+    repository: RedisRepository,
+    server_id: str,
+    interval_seconds: float,
+) -> None:
+    while True:
+        await repository.set_server_heartbeat(server_id, int(time.time()))
+        await asyncio.sleep(interval_seconds)

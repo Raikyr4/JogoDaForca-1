@@ -11,7 +11,7 @@ from app.core.logging import setup_logging
 from app.core.redis import close_redis, get_redis, init_redis
 from app.monitoring.metrics import Metrics
 from app.repositories.redis_repository import RedisRepository
-from app.services.background_tasks import run_metrics_refresh_loop, run_pubsub_loop
+from app.services.background_tasks import run_metrics_refresh_loop, run_pubsub_loop, run_server_heartbeat_loop
 from app.services.connection_manager import ConnectionManager
 from app.services.event_dispatcher import EventDispatcher, ServerChannelSubscriber
 from app.services.game_service import GameService
@@ -82,6 +82,13 @@ async def lifespan(_: FastAPI):
 
     background_tasks = [
         asyncio.create_task(run_pubsub_loop(subscriber)),
+        asyncio.create_task(
+            run_server_heartbeat_loop(
+                repository,
+                settings.server_id,
+                interval_seconds=settings.server_heartbeat_interval_seconds,
+            )
+        ),
         asyncio.create_task(
             run_metrics_refresh_loop(
                 repository,

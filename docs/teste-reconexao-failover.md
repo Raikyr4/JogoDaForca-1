@@ -18,6 +18,16 @@ docker compose up --build -d
 - Backend 2 (direto): `http://localhost:8002/health`
 - Health via balanceador Nginx: `http://localhost/health/backend`
 
+### Opcional: forçar roteamento por jogador (teste cruzado entre containers)
+
+Para fixar uma sessão no backend desejado, adicione `?server=...` na URL:
+
+- Jogador A no backend 1: `http://localhost/?server=game-server-1`
+- Jogador B no backend 2: `http://localhost/?server=game-server-2`
+
+Esse parâmetro é aplicado ao WebSocket (`/ws`) e também às chamadas HTTP do frontend (`/api/...`).
+Se o backend fixado cair durante a partida, o cliente tenta reconectar nele primeiro e, após falha, remove o fixo e volta para o balanceador automaticamente.
+
 ## 3) Cenário base (dois jogadores)
 
 1. Abra duas sessões isoladas do navegador (anônima A e anônima B).
@@ -70,4 +80,3 @@ Para acompanhar o teste:
 ```bash
 docker compose logs -f nginx game-server-1 game-server-2
 ```
-

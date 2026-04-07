@@ -28,6 +28,7 @@ class TimeoutService:
                     continue
                 match_id, player_id = parts
                 await self.game_service.resolve_expired_deadline(match_id, player_id)
+            await self.game_service.recover_players_from_dead_servers()
             await asyncio.sleep(self.check_interval_seconds)
 
     def stop(self) -> None:

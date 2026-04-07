@@ -50,6 +50,90 @@ class GameService:
     def _nickname_claim_ttl(self) -> int:
         return max(self.settings.heartbeat_ttl_seconds, self.settings.reconnect_timeout_seconds + 5)
 
+    async def _server_is_alive(self, server_id: str | None) -> bool:
+        if not server_id:
+            return False
+        if server_id == self.settings.server_id:
+            return True
+        return await self.repository.is_server_alive(server_id)
+
+    async def _mark_player_waiting_reconnect(
+        self,
+        player: Player,
+        now: int,
+        *,
+        preserve_nickname: bool = True,
+        caused_by_server_failure: bool = False,
+    ) -> None:
+        player_id = player["player_id"]
+        player["connected"] = False
+        player["connected_server"] = None
+        player["last_seen"] = now
+        await self.repository.save_player(player)
+
+        if player["status"] == "waiting":
+            if not preserve_nickname:
+                await self.repository.release_nickname_if_owner(player["nickname"], player_id)
+            await self.lobby_service.remove_player_from_waiting_room(player_id)
+            return
+
+        match_id = player.get("match_id")
+        if not match_id:
+            if not preserve_nickname:
+                await self.repository.release_nickname_if_owner(player["nickname"], player_id)
+            return
+
+        lock_key = f"lock:match:{match_id}"
+        token = await self.repository.acquire_lock(lock_key, ttl_ms=5000)
+        if token is None:
+            return
+
+        try:
+            match = await self.repository.get_match(match_id)
+            if match is None or match["status"] != "active":
+                return
+            if player_id not in match["player_ids"]:
+                return
+
+            deadline = now + self.settings.reconnect_timeout_seconds
+            current_deadline = match["disconnect_deadlines"].get(player_id)
+            if current_deadline is None or current_deadline > deadline:
+                match["disconnect_deadlines"][player_id] = deadline
+                match["updated_at"] = now
+                await self.repository.save_match(match)
+                await self.repository.add_reconnect_deadline(match_id, player_id, deadline)
+
+            opp_id = opponent_id(match, player_id)
+            if caused_by_server_failure:
+                message = "Servidor do adversario caiu. Tentando migrar a sessao para outro backend."
+            else:
+                message = "Seu adversario desconectou. Aguardando reconexao por ate 30 segundos."
+            await self.dispatcher.send_to_player(
+                opp_id,
+                {
+                    "type": "opponent_disconnected",
+                    "message": message,
+                },
+            )
+        finally:
+            await self.repository.release_lock(lock_key, token)
+
+    async def _normalize_stale_player_connection(self, player: Player) -> Player:
+        connected_server = player.get("connected_server")
+        if not player.get("connected") or not connected_server:
+            return player
+        if await self._server_is_alive(connected_server):
+            return player
+
+        now = int(time.time())
+        await self._mark_player_waiting_reconnect(
+            player,
+            now,
+            preserve_nickname=True,
+            caused_by_server_failure=True,
+        )
+        return player
+
     async def register_player(self, websocket: WebSocket, nickname: str) -> str:
         nickname = nickname.strip()
         if not nickname:
@@ -61,6 +145,7 @@ class GameService:
             if existing_player is None:
                 await self.repository.release_nickname_if_owner(nickname, existing_player_id)
             else:
+                existing_player = await self._normalize_stale_player_connection(existing_player)
                 if existing_player.get("connected"):
                     raise ValueError("Ja existe um jogador com este nickname conectado")
                 resumed = await self._resume_disconnected_session_from_login(websocket, existing_player)
@@ -160,6 +245,8 @@ class GameService:
             await websocket.send_json({"type": "error", "message": "Sessao nao encontrada"})
             self.metrics.inc_errors("session_not_found")
             return False
+
+        player = await self._normalize_stale_player_connection(player)
 
         nickname_reserved = await self.repository.refresh_nickname_claim(
             player["nickname"],
@@ -264,10 +351,6 @@ class GameService:
             return
 
         now = int(time.time())
-        player["connected"] = False
-        player["connected_server"] = None
-        player["last_seen"] = now
-        await self.repository.save_player(player)
         self.metrics.inc_disconnections()
         logger.info(
             "player_disconnected",
@@ -277,59 +360,50 @@ class GameService:
                 "status": player["status"],
             },
         )
+        await self.repository.refresh_nickname_claim(
+            player["nickname"],
+            player_id,
+            ttl_seconds=self.settings.reconnect_timeout_seconds + 5,
+        )
+        await self._mark_player_waiting_reconnect(player, now, preserve_nickname=True)
+        logger.info(
+            "disconnect_deadline_set",
+            extra={
+                "event": "disconnect_deadline_set",
+                "match_id": player.get("match_id"),
+                "player_id": player_id,
+                "deadline": now + self.settings.reconnect_timeout_seconds,
+            },
+        )
 
-        if player["status"] == "waiting":
-            await self.repository.release_nickname_if_owner(player["nickname"], player_id)
-            await self.lobby_service.remove_player_from_waiting_room(player_id)
-            return
+    async def recover_players_from_dead_servers(self) -> None:
+        player_ids = await self.repository.list_player_ids()
+        now = int(time.time())
+        for player_id in player_ids:
+            player = await self.repository.get_player(player_id)
+            if player is None:
+                continue
+            connected_server = player.get("connected_server")
+            if not player.get("connected") or not connected_server:
+                continue
+            if await self._server_is_alive(connected_server):
+                continue
 
-        match_id = player.get("match_id")
-        if not match_id:
-            await self.repository.release_nickname_if_owner(player["nickname"], player_id)
-            return
-
-        lock_key = f"lock:match:{match_id}"
-        token = await self.repository.acquire_lock(lock_key, ttl_ms=5000)
-        if token is None:
-            return
-
-        try:
-            match = await self.repository.get_match(match_id)
-            if match is None or match["status"] != "active":
-                return
-            if player_id not in match["player_ids"]:
-                return
-
-            deadline = now + self.settings.reconnect_timeout_seconds
-            match["disconnect_deadlines"][player_id] = deadline
-            match["updated_at"] = now
-            await self.repository.save_match(match)
-            await self.repository.add_reconnect_deadline(match_id, player_id, deadline)
-            await self.repository.refresh_nickname_claim(
-                player["nickname"],
-                player_id,
-                ttl_seconds=self.settings.reconnect_timeout_seconds + 5,
+            await self._mark_player_waiting_reconnect(
+                player,
+                now,
+                preserve_nickname=True,
+                caused_by_server_failure=True,
             )
-
-            opp_id = opponent_id(match, player_id)
-            await self.dispatcher.send_to_player(
-                opp_id,
-                {
-                    "type": "opponent_disconnected",
-                    "message": "Seu adversario desconectou. Aguardando reconexao por ate 30 segundos.",
-                },
-            )
-            logger.info(
-                "disconnect_deadline_set",
+            logger.warning(
+                "player_marked_for_failover",
                 extra={
-                    "event": "disconnect_deadline_set",
-                    "match_id": match_id,
+                    "event": "player_marked_for_failover",
                     "player_id": player_id,
-                    "deadline": deadline,
+                    "failed_server_id": connected_server,
+                    "status": player.get("status"),
                 },
             )
-        finally:
-            await self.repository.release_lock(lock_key, token)
 
     async def _resume_disconnected_session_from_login(self, websocket: WebSocket, player: Player) -> bool:
         player_id = player["player_id"]

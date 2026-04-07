@@ -34,6 +34,10 @@ class RedisRepository:
         normalized = nickname.strip().lower()
         return f"nickname:active:{normalized}"
 
+    @staticmethod
+    def _server_heartbeat_key(server_id: str) -> str:
+        return f"server:heartbeat:{server_id}"
+
     async def _set_json(self, key: str, value: dict) -> None:
         await self.redis.set(key, json.dumps(value))
 
@@ -49,6 +53,17 @@ class RedisRepository:
     async def get_player(self, player_id: str) -> Optional[Player]:
         data = await self._get_json(self._player_key(player_id))
         return data  # type: ignore[return-value]
+
+    async def list_player_ids(self) -> list[str]:
+        cursor = 0
+        player_ids: list[str] = []
+        while True:
+            cursor, keys = await self.redis.scan(cursor=cursor, match="player:*", count=200)
+            for key in keys:
+                player_ids.append(str(key).removeprefix("player:"))
+            if cursor == 0:
+                break
+        return player_ids
 
     async def save_match(self, match: MatchState) -> None:
         await self._set_json(self._match_key(match["match_id"]), match)
@@ -110,6 +125,18 @@ class RedisRepository:
             str(timestamp),
             ex=self.settings.heartbeat_ttl_seconds,
         )
+
+    async def set_server_heartbeat(self, server_id: str, timestamp: int) -> None:
+        await self.redis.set(
+            self._server_heartbeat_key(server_id),
+            str(timestamp),
+            ex=self.settings.server_heartbeat_ttl_seconds,
+        )
+
+    async def is_server_alive(self, server_id: str) -> bool:
+        if not server_id:
+            return False
+        return bool(await self.redis.exists(self._server_heartbeat_key(server_id)))
 
     async def add_active_match(self, match_id: str) -> None:
         await self.redis.sadd(self.settings.active_matches_key, match_id)
